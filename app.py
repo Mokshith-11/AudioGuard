@@ -12,6 +12,13 @@ import io
 import time
 import tempfile
 from pathlib import Path
+from datetime import date
+
+# ─── Paywall config ──────────────────────────────────────────────────────────
+FREE_LIMIT        = 3
+# Replace this URL the moment Lemon Squeezy approves your account:
+CHECKOUT_URL      = "https://mokshith-audioguard.lemonsqueezy.com/checkout/buy/fc2d908a-5e48-4a6f-9320-b8c29e2e8ccb"
+UPGRADE_PRICE     = "₹299/mo"
 
 # ─── Page config ────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -232,6 +239,82 @@ html, body, [class*="css"] {
     margin: 1rem 0;
 }
 
+/* Paywall card */
+.paywall {
+    background: #111318;
+    border: 1px solid #00e5a0;
+    border-radius: 12px;
+    padding: 2.5rem 2rem;
+    text-align: center;
+    margin: 2rem 0;
+}
+.paywall h3 {
+    font-family: var(--mono);
+    font-size: 1.3rem;
+    font-weight: 700;
+    color: #fff;
+    margin-bottom: 0.6rem;
+}
+.paywall p {
+    font-size: 14px;
+    color: var(--muted);
+    margin-bottom: 1.5rem;
+    line-height: 1.6;
+}
+.paywall-perks {
+    display: flex;
+    justify-content: center;
+    gap: 1.5rem;
+    flex-wrap: wrap;
+    margin-bottom: 1.8rem;
+}
+.paywall-perk {
+    font-size: 12px;
+    color: var(--accent);
+    font-family: var(--mono);
+}
+.paywall-perk::before { content: '✓ '; }
+.paywall-btn {
+    display: inline-block;
+    background: var(--accent);
+    color: #000;
+    font-family: var(--mono);
+    font-size: 13px;
+    font-weight: 700;
+    padding: 0.75rem 2.5rem;
+    border-radius: 4px;
+    text-decoration: none;
+    letter-spacing: 0.05em;
+    transition: background .2s;
+}
+.paywall-btn:hover { background: #00c98a; }
+.paywall-note {
+    font-size: 11px;
+    color: var(--muted);
+    margin-top: 1rem;
+    font-family: var(--mono);
+}
+.usage-bar-wrap {
+    background: var(--border);
+    border-radius: 2px;
+    height: 4px;
+    margin: 0.5rem 0 0.3rem;
+    overflow: hidden;
+    max-width: 300px;
+}
+.usage-bar-inner {
+    height: 100%;
+    border-radius: 2px;
+    background: var(--accent);
+    transition: width 0.5s ease;
+}
+.usage-label {
+    font-family: var(--mono);
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+}
+
 /* Streamlit overrides */
 .stFileUploader > div {
     background: var(--surface) !important;
@@ -402,6 +485,85 @@ def extract_features(audio, sr, n_mfcc=40, n_mels=128, target_length=128):
     return features.astype(np.float32)
 
 
+# ─── Paywall helpers ─────────────────────────────────────────────────────────
+
+def get_usage():
+    """Return (count_today, is_pro) from session state."""
+    today = str(date.today())
+    if "usage_date" not in st.session_state or st.session_state.usage_date != today:
+        st.session_state.usage_date  = today
+        st.session_state.usage_count = 0
+    if "is_pro" not in st.session_state:
+        st.session_state.is_pro = False
+    return st.session_state.usage_count, st.session_state.is_pro
+
+def increment_usage():
+    st.session_state.usage_count += 1
+
+def activate_pro(code: str) -> bool:
+    """
+    Simple licence-code check.
+    In production, verify against Lemon Squeezy's API.
+    For now: any non-empty string starting with 'AG-' is accepted.
+    """
+    return code.strip().upper().startswith("AG-")
+
+def show_paywall():
+    used, _ = get_usage()
+    st.markdown(f"""
+    <div class="paywall">
+      <h3>You've used your {FREE_LIMIT} free checks today</h3>
+      <p>Upgrade to AudioGuard Pro for unlimited checks,<br/>bulk upload, and API access.</p>
+      <div class="paywall-perks">
+        <span class="paywall-perk">Unlimited checks</span>
+        <span class="paywall-perk">Bulk CSV upload</span>
+        <span class="paywall-perk">API access</span>
+        <span class="paywall-perk">All formats</span>
+      </div>
+      <a class="paywall-btn" href="{CHECKOUT_URL}" target="_blank">
+        Upgrade to Pro — {UPGRADE_PRICE}
+      </a>
+      <p class="paywall-note">After payment, you'll receive a licence key via email.<br/>Enter it below to unlock unlimited access.</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    with st.form("licence_form"):
+        code = st.text_input("Enter licence key (format: AG-XXXX-XXXX)", placeholder="AG-XXXX-XXXX")
+        submitted = st.form_submit_button("Activate Pro →")
+        if submitted:
+            if activate_pro(code):
+                st.session_state.is_pro = True
+                st.success("Pro activated! Unlimited checks unlocked.")
+                st.rerun()
+            else:
+                st.error("Invalid key. Check your email from Lemon Squeezy.")
+
+def show_usage_meter():
+    used, is_pro = get_usage()
+    if is_pro:
+        st.markdown("""
+        <div style="text-align:right;margin-bottom:1rem">
+          <span style="font-family:'Space Mono',monospace;font-size:11px;
+                color:#00e5a0;border:1px solid #00e5a040;padding:3px 10px;border-radius:2px">
+            PRO · Unlimited
+          </span>
+        </div>
+        """, unsafe_allow_html=True)
+    else:
+        pct = int((used / FREE_LIMIT) * 100)
+        color = "#00e5a0" if used < FREE_LIMIT else "#ff4d6d"
+        st.markdown(f"""
+        <div style="text-align:right;margin-bottom:1rem">
+          <span class="usage-label" style="color:{color}">
+            {used}/{FREE_LIMIT} FREE CHECKS USED TODAY
+          </span>
+          <div class="usage-bar-wrap" style="margin-left:auto">
+            <div class="usage-bar-inner" style="width:{pct}%;background:{color}"></div>
+          </div>
+        </div>
+        """, unsafe_allow_html=True)
+
+
 # ─── Load Model ─────────────────────────────────────────────────────────────
 @st.cache_resource
 def load_model():
@@ -536,12 +698,19 @@ if uploaded:
 
     st.audio(uploaded)
 
+    # Usage meter
+    show_usage_meter()
+    used, is_pro = get_usage()
+
     # Analyse button
     st.markdown('<span class="section-head">Run Analysis</span>', unsafe_allow_html=True)
 
-    if st.button("Analyse Audio →"):
+    if not is_pro and used >= FREE_LIMIT:
+        show_paywall()
+    elif st.button("Analyse Audio →"):
         with st.spinner("Extracting 268-dimensional features…"):
-            time.sleep(0.4)  # let spinner render
+            time.sleep(0.4)
+            increment_usage()
             if weights_loaded:
                 label, confidence, real_p, fake_p = predict(audio, sr, model)
             else:
