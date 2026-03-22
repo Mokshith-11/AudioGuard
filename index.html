@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>AudioGuard — Deepfake Audio Detection</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=Instrument+Sans:wght@300;400;500&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+:root {
+  --bg: #f5f2eb;
+  --ink: #0e0d0a;
+  --ink2: #3d3b35;
+  --ink3: #8a8679;
+  --accent: #c8440a;
+  --accent2: #e85c1a;
+  --surface: #eceae2;
+  --border: #d4d0c5;
+  --mono: 'DM Mono', monospace;
+  --display: 'Syne', sans-serif;
+  --body: 'Instrument Sans', sans-serif;
+}
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  font-family: var(--body);
+  background: var(--bg);
+  color: var(--ink);
+  overflow-x: hidden;
+}
+
+/* noise texture overlay */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  z-index: 1000;
+  opacity: 0.4;
+}
+
+/* NAV */
+nav {
+  position: fixed; top: 0; left: 0; right: 0;
+  z-index: 100;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 1.2rem 3rem;
+  border-bottom: 1px solid var(--border);
+  background: rgba(245,242,235,0.92);
+  backdrop-filter: blur(12px);
+}
+.nav-logo {
+  font-family: var(--display);
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.nav-logo span { color: var(--accent); }
+.nav-links { display: flex; gap: 2rem; align-items: center; }
+.nav-links a {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--ink2);
+  text-decoration: none;
+  letter-spacing: 0.01em;
+  transition: color .2s;
+}
+.nav-links a:hover { color: var(--accent); }
+.nav-cta {
+  background: var(--ink) !important;
+  color: var(--bg) !important;
+  padding: 0.5rem 1.2rem !important;
+  border-radius: 3px !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+}
+.nav-cta:hover { background: var(--accent) !important; color: #fff !important; }
+
+/* HERO */
+.hero {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 8rem 3rem 5rem;
+  position: relative;
+  overflow: hidden;
+}
+.hero-eyebrow {
+  font-family: var(--mono);
+  font-size: 11px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1.5rem;
+  opacity: 0;
+  animation: fadeUp 0.6s ease forwards 0.2s;
+}
+.hero h1 {
+  font-family: var(--display);
+  font-size: clamp(3.5rem, 8vw, 7.5rem);
+  font-weight: 800;
+  line-height: 0.95;
+  letter-spacing: -0.04em;
+  max-width: 900px;
+  opacity: 0;
+  animation: fadeUp 0.7s ease forwards 0.35s;
+}
+.hero h1 em {
+  font-style: normal;
+  color: var(--accent);
+  position: relative;
+}
+.hero h1 em::after {
+  content: '';
+  position: absolute;
+  bottom: 4px; left: 0; right: 0;
+  height: 3px;
+  background: var(--accent);
+  opacity: 0.3;
+}
+.hero-sub {
+  font-size: 1.15rem;
+  font-weight: 300;
+  color: var(--ink2);
+  max-width: 520px;
+  line-height: 1.7;
+  margin-top: 2rem;
+  opacity: 0;
+  animation: fadeUp 0.7s ease forwards 0.5s;
+}
+.hero-actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  margin-top: 2.5rem;
+  opacity: 0;
+  animation: fadeUp 0.7s ease forwards 0.65s;
+}
+.btn-primary {
+  background: var(--accent);
+  color: #fff;
+  padding: 0.85rem 2rem;
+  font-family: var(--body);
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  border-radius: 3px;
+  cursor: pointer;
+  text-decoration: none;
+  display: inline-block;
+  transition: background .2s, transform .15s;
+  letter-spacing: 0.01em;
+}
+.btn-primary:hover { background: var(--accent2); transform: translateY(-1px); }
+.btn-ghost {
+  color: var(--ink2);
+  font-size: 13px;
+  font-weight: 500;
+  text-decoration: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: color .2s;
+}
+.btn-ghost:hover { color: var(--accent); }
+.btn-ghost::after { content: '→'; }
+
+/* waveform decoration */
+.hero-wave {
+  position: absolute;
+  right: -2rem;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 45%;
+  opacity: 0;
+  animation: fadeLeft 0.9s ease forwards 0.8s;
+}
+.wave-bars {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  height: 220px;
+}
+.wave-bar {
+  flex: 1;
+  background: var(--border);
+  border-radius: 2px;
+  animation: pulse var(--d, 1.4s) ease-in-out infinite;
+  animation-delay: var(--delay, 0s);
+}
+@keyframes pulse {
+  0%, 100% { height: var(--h1, 30%); background: var(--border); }
+  50% { height: var(--h2, 80%); background: var(--accent); opacity: 0.6; }
+}
+
+/* TRUST BAR */
+.trust-bar {
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  padding: 1.2rem 3rem;
+  display: flex;
+  gap: 3rem;
+  align-items: center;
+  overflow-x: auto;
+}
+.trust-item {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  white-space: nowrap;
+}
+.trust-num {
+  font-family: var(--display);
+  font-size: 1.6rem;
+  font-weight: 800;
+  color: var(--ink);
+  letter-spacing: -0.03em;
+}
+.trust-label {
+  font-size: 12px;
+  color: var(--ink3);
+  font-weight: 400;
+}
+.trust-divider { width: 1px; height: 32px; background: var(--border); flex-shrink: 0; }
+
+/* SECTIONS */
+section { padding: 6rem 3rem; }
+
+.section-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--ink3);
+  margin-bottom: 1rem;
+  display: block;
+}
+
+/* WHO IT'S FOR */
+.for-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  margin-top: 3rem;
+}
+.for-card {
+  background: var(--bg);
+  padding: 2.5rem 2rem;
+  transition: background .2s;
+}
+.for-card:hover { background: var(--surface); }
+.for-card-num {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  margin-bottom: 1.2rem;
+  display: block;
+}
+.for-card h3 {
+  font-family: var(--display);
+  font-size: 1.3rem;
+  font-weight: 700;
+  margin-bottom: 0.8rem;
+  letter-spacing: -0.02em;
+}
+.for-card p {
+  font-size: 14px;
+  color: var(--ink2);
+  line-height: 1.7;
+}
+.for-card-tag {
+  display: inline-block;
+  margin-top: 1.2rem;
+  font-size: 11px;
+  font-family: var(--mono);
+  color: var(--accent);
+  background: rgba(200,68,10,0.08);
+  padding: 3px 10px;
+  border-radius: 2px;
+}
+
+/* HOW IT WORKS */
+.how-section { background: var(--ink); color: var(--bg); }
+.how-section .section-tag { color: var(--accent); }
+.how-section h2 {
+  font-family: var(--display);
+  font-size: clamp(2rem, 4vw, 3.2rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  max-width: 600px;
+  margin-bottom: 3rem;
+}
+.steps-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 2px;
+  background: #1e1d18;
+}
+.step-card {
+  background: #141310;
+  padding: 2rem 1.5rem;
+  position: relative;
+  overflow: hidden;
+}
+.step-card::before {
+  content: var(--n);
+  position: absolute;
+  top: -0.5rem; right: 1rem;
+  font-family: var(--display);
+  font-size: 5rem;
+  font-weight: 800;
+  color: #1e1d18;
+  line-height: 1;
+  pointer-events: none;
+}
+.step-card h4 {
+  font-family: var(--display);
+  font-size: 1rem;
+  font-weight: 700;
+  margin-bottom: 0.6rem;
+  position: relative;
+}
+.step-card p {
+  font-size: 13px;
+  color: #8a8679;
+  line-height: 1.6;
+  position: relative;
+}
+.step-card .step-tag {
+  display: inline-block;
+  margin-top: 1rem;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: var(--accent);
+  letter-spacing: 0.1em;
+}
+
+/* ARCHITECTURE */
+.arch-section {
+  border-top: 1px solid var(--border);
+}
+.arch-section h2 {
+  font-family: var(--display);
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  max-width: 700px;
+  margin-bottom: 3rem;
+}
+.arch-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-width: 700px;
+}
+.arch-row {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+}
+.arch-label {
+  width: 160px;
+  flex-shrink: 0;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 1rem 1.2rem;
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--accent);
+  letter-spacing: 0.08em;
+  display: flex;
+  align-items: center;
+}
+.arch-body {
+  flex: 1;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  padding: 1rem 1.4rem;
+}
+.arch-body strong {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  display: block;
+  margin-bottom: 3px;
+}
+.arch-body span {
+  font-size: 12px;
+  color: var(--ink3);
+  line-height: 1.5;
+}
+.arch-badge {
+  width: 80px;
+  flex-shrink: 0;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--mono);
+  font-size: 10px;
+  color: #fff;
+  letter-spacing: 0.08em;
+  text-align: center;
+  padding: 0.5rem;
+}
+
+/* PRICING */
+.pricing-section { background: var(--surface); }
+.pricing-section h2 {
+  font-family: var(--display);
+  font-size: clamp(2rem, 4vw, 3rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  margin-bottom: 3rem;
+}
+.pricing-grid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1px;
+  background: var(--border);
+  border: 1px solid var(--border);
+  max-width: 860px;
+}
+.price-card {
+  background: var(--bg);
+  padding: 2rem 1.8rem;
+  position: relative;
+}
+.price-card.featured {
+  background: var(--ink);
+  color: var(--bg);
+}
+.price-card.featured .price-desc { color: #8a8679; }
+.price-card.featured .price-feature { border-color: #2a2924; color: #c8c4b8; }
+.featured-tag {
+  font-family: var(--mono);
+  font-size: 10px;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 1rem;
+  display: block;
+}
+.price-name {
+  font-family: var(--display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  margin-bottom: 0.8rem;
+}
+.price-amount {
+  font-family: var(--display);
+  font-size: 2.5rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1;
+  margin-bottom: 0.3rem;
+}
+.price-amount span {
+  font-size: 1rem;
+  font-weight: 400;
+  font-family: var(--body);
+  opacity: 0.6;
+}
+.price-desc {
+  font-size: 12px;
+  color: var(--ink3);
+  margin-bottom: 1.5rem;
+  line-height: 1.5;
+}
+.price-feature {
+  font-size: 13px;
+  padding: 0.5rem 0;
+  border-top: 1px solid var(--border);
+  color: var(--ink2);
+  display: flex;
+  gap: 8px;
+}
+.price-feature::before { content: '→'; color: var(--accent); flex-shrink: 0; }
+.price-btn {
+  display: block;
+  margin-top: 1.8rem;
+  text-align: center;
+  padding: 0.75rem;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 3px;
+  text-decoration: none;
+  transition: all .2s;
+}
+.price-btn-outline {
+  border: 1px solid var(--border);
+  color: var(--ink);
+}
+.price-btn-outline:hover { border-color: var(--accent); color: var(--accent); }
+.price-btn-filled {
+  background: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+}
+.price-btn-filled:hover { background: var(--accent2); }
+
+/* CTA */
+.cta-section {
+  text-align: center;
+  padding: 7rem 3rem;
+  border-top: 1px solid var(--border);
+  position: relative;
+  overflow: hidden;
+}
+.cta-section::before {
+  content: 'AUDIOGUARD';
+  position: absolute;
+  top: 50%; left: 50%;
+  transform: translate(-50%, -50%);
+  font-family: var(--display);
+  font-size: 18vw;
+  font-weight: 800;
+  color: var(--border);
+  white-space: nowrap;
+  pointer-events: none;
+  letter-spacing: -0.05em;
+  opacity: 0.5;
+}
+.cta-section h2 {
+  font-family: var(--display);
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  margin-bottom: 1.2rem;
+  position: relative;
+}
+.cta-section p {
+  font-size: 1rem;
+  color: var(--ink2);
+  margin-bottom: 2.5rem;
+  position: relative;
+}
+
+/* FOOTER */
+footer {
+  border-top: 1px solid var(--border);
+  padding: 2rem 3rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  color: var(--ink3);
+}
+footer a { color: var(--ink3); text-decoration: none; }
+footer a:hover { color: var(--accent); }
+
+/* ANIMATIONS */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes fadeLeft {
+  from { opacity: 0; transform: translate(30px, -50%); }
+  to   { opacity: 0.9; transform: translate(0, -50%); }
+}
+.reveal {
+  opacity: 0;
+  transform: translateY(24px);
+  transition: opacity 0.6s ease, transform 0.6s ease;
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+
+@media (max-width: 768px) {
+  nav { padding: 1rem 1.5rem; }
+  .nav-links { display: none; }
+  .hero { padding: 7rem 1.5rem 4rem; }
+  .hero-wave { display: none; }
+  section { padding: 4rem 1.5rem; }
+  .for-grid, .steps-grid, .pricing-grid { grid-template-columns: 1fr; }
+  .trust-bar { padding: 1rem 1.5rem; gap: 1.5rem; }
+  .arch-label { width: 100px; font-size: 9px; }
+  footer { flex-direction: column; gap: 0.5rem; text-align: center; }
+}
+</style>
+</head>
+<body>
+
+<nav>
+  <a class="nav-logo" href="#">Audio<span>Guard</span></a>
+  <div class="nav-links">
+    <a href="#how">How it works</a>
+    <a href="#architecture">Architecture</a>
+    <a href="#pricing">Pricing</a>
+    <a href="https://audioguard-hebv42pmtcmb8yg9xmb6s3.streamlit.app/" class="nav-cta" target="_blank">Try free →</a>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero">
+  <div class="hero-eyebrow">Deepfake Audio Detection · 95.8% Accuracy</div>
+  <h1>Is that voice<br/><em>real?</em></h1>
+  <p class="hero-sub">AudioGuard detects AI-generated and cloned voices in seconds. Built for journalists, podcasters, and content teams who can't afford to be fooled.</p>
+  <div class="hero-actions">
+    <a href="https://audioguard-hebv42pmtcmb8yg9xmb6s3.streamlit.app/" class="btn-primary" target="_blank">Analyse an audio file free</a>
+    <a href="#how" class="btn-ghost">See how it works</a>
+  </div>
+
+  <!-- animated waveform -->
+  <div class="hero-wave" aria-hidden="true">
+    <div class="wave-bars" id="waveBars"></div>
+  </div>
+</section>
+
+<!-- TRUST BAR -->
+<div class="trust-bar">
+  <div class="trust-item">
+    <span class="trust-num">95.8%</span>
+    <span class="trust-label">Detection accuracy</span>
+  </div>
+  <div class="trust-divider"></div>
+  <div class="trust-item">
+    <span class="trust-num">268</span>
+    <span class="trust-label">Audio features analysed</span>
+  </div>
+  <div class="trust-divider"></div>
+  <div class="trust-item">
+    <span class="trust-num">&lt;2s</span>
+    <span class="trust-label">Time to verdict</span>
+  </div>
+  <div class="trust-divider"></div>
+  <div class="trust-item">
+    <span class="trust-num">FoR</span>
+    <span class="trust-label">Dataset · TP 245 / TN 234</span>
+  </div>
+  <div class="trust-divider"></div>
+  <div class="trust-item">
+    <span class="trust-num">WAV MP3<br/>FLAC OGG</span>
+    <span class="trust-label">Supported formats</span>
+  </div>
+</div>
+
+<!-- WHO IT'S FOR -->
+<section id="who">
+  <span class="section-tag reveal">Who it's for</span>
+  <div class="for-grid reveal">
+    <div class="for-card">
+      <span class="for-card-num">01</span>
+      <h3>Journalists &amp; Fact-checkers</h3>
+      <p>Voice recordings are evidence — until they're not. Verify audio clips before publishing. Protect your credibility in an era of synthetic media.</p>
+      <span class="for-card-tag">verify before you publish</span>
+    </div>
+    <div class="for-card">
+      <span class="for-card-num">02</span>
+      <h3>Podcasters &amp; Media Producers</h3>
+      <p>Guest interviews, call-in segments, user-generated clips — any unverified audio is a risk. Run it through AudioGuard before it goes live.</p>
+      <span class="for-card-tag">protect your audience</span>
+    </div>
+    <div class="for-card">
+      <span class="for-card-num">03</span>
+      <h3>Content Moderators</h3>
+      <p>Scale your moderation pipeline with automated AI voice detection. Flag suspicious audio at volume without reviewing every clip manually.</p>
+      <span class="for-card-tag">scale your pipeline</span>
+    </div>
+  </div>
+</section>
+
+<!-- HOW IT WORKS -->
+<section class="how-section" id="how">
+  <span class="section-tag reveal">How it works</span>
+  <h2 class="reveal">Four steps.<br/>One verdict.</h2>
+  <div class="steps-grid reveal">
+    <div class="step-card" style="--n:'1'">
+      <h4>Upload</h4>
+      <p>Drop any audio file — WAV, MP3, FLAC, OGG, M4A. Up to 200 MB. No account needed on the free tier.</p>
+      <span class="step-tag">ANY FORMAT</span>
+    </div>
+    <div class="step-card" style="--n:'2'">
+      <h4>Extract</h4>
+      <p>268 acoustic features are computed: MFCCs, Mel spectrogram, chroma, spectral contrast, and zero-crossing rate.</p>
+      <span class="step-tag">268 FEATURES</span>
+    </div>
+    <div class="step-card" style="--n:'3'">
+      <h4>Analyse</h4>
+      <p>A CNN + BiLSTM + self-attention model processes the features, trained specifically to separate real from synthesised voices.</p>
+      <span class="step-tag">DEEP LEARNING</span>
+    </div>
+    <div class="step-card" style="--n:'4'">
+      <h4>Verdict</h4>
+      <p>Real or Fake — with a confidence score, waveform, and mel spectrogram. Results in under 2 seconds.</p>
+      <span class="step-tag">&lt;2 SECONDS</span>
+    </div>
+  </div>
+</section>
+
+<!-- ARCHITECTURE -->
+<section class="arch-section" id="architecture">
+  <span class="section-tag reveal">Under the hood</span>
+  <h2 class="reveal">Research-grade architecture,<br/>production-ready speed.</h2>
+  <div class="arch-stack reveal">
+    <div class="arch-row">
+      <div class="arch-label">INPUT</div>
+      <div class="arch-body">
+        <strong>268 × T feature matrix</strong>
+        <span>MFCC (40 + Δ + ΔΔ) · Mel spectrogram (128) · Chroma (12) · Spectral contrast (7) · ZCR (1)</span>
+      </div>
+      <div class="arch-badge">FEATURES</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-label">LAYER 1</div>
+      <div class="arch-body">
+        <strong>Convolutional Neural Network</strong>
+        <span>3× Conv2D + BatchNorm + MaxPool — extracts local spectral patterns</span>
+      </div>
+      <div class="arch-badge">CNN</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-label">LAYER 2</div>
+      <div class="arch-body">
+        <strong>Bidirectional LSTM</strong>
+        <span>2 layers · 256 hidden units · models temporal dependencies in both directions</span>
+      </div>
+      <div class="arch-badge">BiLSTM</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-label">LAYER 3</div>
+      <div class="arch-body">
+        <strong>AudioLM-style Self-Attention</strong>
+        <span>Q·Kᵀ/√dₖ·V — weights the most discriminative time frames</span>
+      </div>
+      <div class="arch-badge">ATTENTION</div>
+    </div>
+    <div class="arch-row">
+      <div class="arch-label">OUTPUT</div>
+      <div class="arch-body">
+        <strong>Siamese head + classifier</strong>
+        <span>Contrastive loss · 128-dim embedding · Real vs Fake with confidence score</span>
+      </div>
+      <div class="arch-badge" style="background:#0e0d0a">95.8%</div>
+    </div>
+  </div>
+</section>
+
+<!-- PRICING -->
+<section class="pricing-section" id="pricing">
+  <span class="section-tag reveal">Pricing</span>
+  <h2 class="reveal">Start free.<br/>Scale when you need to.</h2>
+  <div class="pricing-grid reveal">
+    <div class="price-card">
+      <span class="price-name">Free</span>
+      <div class="price-amount">₹0<span>/mo</span></div>
+      <p class="price-desc">For individuals exploring the tool</p>
+      <div class="price-feature">3 audio checks per day</div>
+      <div class="price-feature">WAV, MP3, FLAC support</div>
+      <div class="price-feature">Confidence score + waveform</div>
+      <a href="https://audioguard-hebv42pmtcmb8yg9xmb6s3.streamlit.app/" class="price-btn price-btn-outline" target="_blank">Start free</a>
+    </div>
+    <div class="price-card featured">
+      <span class="featured-tag">Most popular</span>
+      <span class="price-name">Pro</span>
+      <div class="price-amount">₹299<span>/mo</span></div>
+      <p class="price-desc">For journalists and content creators</p>
+      <div class="price-feature">Unlimited checks</div>
+      <div class="price-feature">Bulk CSV upload</div>
+      <div class="price-feature">Priority processing</div>
+      <div class="price-feature">All file formats</div>
+      <a href="#" class="price-btn price-btn-filled">Get Pro</a>
+    </div>
+    <div class="price-card">
+      <span class="price-name">API</span>
+      <div class="price-amount">₹999<span>/mo</span></div>
+      <p class="price-desc">For teams and platforms</p>
+      <div class="price-feature">REST API access</div>
+      <div class="price-feature">API key dashboard</div>
+      <div class="price-feature">10,000 calls/mo</div>
+      <div class="price-feature">SLA support</div>
+      <a href="#" class="price-btn price-btn-outline">Contact us</a>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <h2 class="reveal">Don't publish blind.</h2>
+  <p class="reveal">Test any audio file for free. No signup required.</p>
+  <a href="https://audioguard-hebv42pmtcmb8yg9xmb6s3.streamlit.app/" class="btn-primary reveal" target="_blank" style="font-size:15px;padding:1rem 2.5rem">Analyse audio free →</a>
+</section>
+
+<footer>
+  <span>© 2026 AudioGuard · Built by Mokshith</span>
+  <span>
+    <a href="terms.html">Terms of Service</a> &nbsp;·&nbsp;
+    <a href="refund.html">Refund Policy</a> &nbsp;·&nbsp;
+    <a href="mailto:audioguard.app@gmail.com">Contact</a>
+  </span>
+  <a href="https://audioguard-hebv42pmtcmb8yg9xmb6s3.streamlit.app/" target="_blank">Open app →</a>
+</footer>
+
+<script>
+// generate waveform bars
+const container = document.getElementById('waveBars');
+const heights = [20,35,55,80,65,90,45,70,85,50,75,60,40,95,55,30,70,85,45,65,80,35,60,75,50,90,40,70,55,80,30,65,85,45,75,60,95,35,55,80];
+heights.forEach((h, i) => {
+  const bar = document.createElement('div');
+  bar.className = 'wave-bar';
+  const h2 = Math.min(100, h + Math.random() * 20);
+  bar.style.cssText = `--h1:${h * 0.3}%;--h2:${h2}%;--d:${1.2 + Math.random()}s;--delay:${i * 0.04}s`;
+  container.appendChild(bar);
+});
+
+// scroll reveal
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.1 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+</script>
+</body>
+</html>
